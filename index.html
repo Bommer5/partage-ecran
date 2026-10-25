@@ -36,6 +36,8 @@
   }
   #stage.fake-fs #tools { top:max(8px, env(safe-area-inset-top)); right:max(8px, env(safe-area-inset-right)); }
   body.fs-lock { overflow:hidden; }
+  #unmute { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:18px; padding:14px 22px; display:none; z-index:2; }
+  #noAudio { position:absolute; bottom:8px; left:8px; background:#000a; padding:4px 8px; border-radius:6px; font-size:12px; display:none; }
 </style>
 </head>
 <body>
@@ -61,6 +63,7 @@
         <button id="copyBtn" class="sec">Copier</button>
       </div>
       <div class="mut" id="viewers" style="margin-top:6px">0 spectateur</div>
+      <div id="audioWarn" class="err" style="display:none;margin-top:6px;font-size:14px">⚠️ Aucun son partagé. Pour avoir le son : arrête, puis repartage un <b>onglet Chrome</b> en cochant « Partager l'audio de l'onglet » (ou l'<b>écran entier</b> sur Windows en cochant « Partager l'audio du système »).</div>
     </div>
     <hr style="border-color:#262a33;margin:20px 0">
     <h3>Regarder l'écran de quelqu'un</h3>
@@ -74,6 +77,8 @@
   <div id="stage">
     <video id="video" autoplay playsinline muted></video>
     <div id="stats"></div>
+    <button id="unmute">🔊 Toucher pour activer le son</button>
+    <div id="noAudio">🔇 L'hôte ne partage pas de son</div>
     <div id="tools">
       <button id="soundBtn">🔇 Son</button>
       <button id="fsBtn">⛶ Plein écran</button>
@@ -139,6 +144,7 @@ $('shareBtn').onclick = async () => {
   const vt = stream.getVideoTracks()[0];
   vt.contentHint = preset.hint;
   vt.onended = stop;
+  $('audioWarn').style.display = stream.getAudioTracks().length ? 'none' : 'block';
   showVideo(stream, true);
 
   peer = newPeer();
@@ -196,11 +202,29 @@ function join(code) {
 }
 $('joinBtn').onclick = () => join($('code').value);
 
+function refreshAudioUI(s, isHost) {
+  const v = $('video'), hasAudio = s.getAudioTracks().length > 0;
+  $('soundBtn').style.display = (!isHost && hasAudio) ? '' : 'none';
+  $('soundBtn').textContent = v.muted ? '🔇 Son' : '🔊 Son';
+  $('unmute').style.display = (!isHost && hasAudio && v.muted) ? 'block' : 'none';
+  $('noAudio').style.display = (!isHost && !hasAudio) ? 'block' : 'none';
+}
+async function setSound(on) {
+  const v = $('video');
+  v.muted = !on;
+  try { await v.play(); } catch (e) { v.muted = true; v.play().catch(() => {}); }
+  refreshAudioUI(v.srcObject, false);
+}
 function showVideo(s, isHost) {
   const v = $('video');
-  v.srcObject = s; v.muted = true;
+  if (v.srcObject !== s) {
+    v.srcObject = s;
+    s.onaddtrack = s.onremovetrack = () => refreshAudioUI(s, isHost);
+  }
   $('stage').style.display = 'block';
-  $('soundBtn').style.display = (!isHost && s.getAudioTracks().length) ? '' : 'none';
+  if (isHost) { v.muted = true; v.play().catch(() => {}); }
+  else setSound(true); // le navigateur peut refuser le son sans un toucher : on bascule alors sur le gros bouton
+  refreshAudioUI(s, isHost);
   clearInterval(statsTimer);
   let last = null;
   statsTimer = setInterval(async () => {
@@ -220,7 +244,8 @@ function showVideo(s, isHost) {
     $('stats').textContent = (isHost ? 'Aperçu · ' : '') + txt;
   }, 1000);
 }
-$('soundBtn').onclick = () => { const v = $('video'); v.muted = !v.muted; $('soundBtn').textContent = v.muted ? '🔇 Son' : '🔊 Son'; };
+$('soundBtn').onclick = () => setSound($('video').muted);
+$('unmute').onclick = () => setSound(true);
 // Plein écran compatible iPad / iPhone / ordinateur
 const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement;
 function setFake(on) {
