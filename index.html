@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Partage d'écran</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --txt:#e8eaf0; --mut:#8b90a0; --acc:#4f8cff; --ok:#3ecf8e; --err:#ff5c5c; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--txt); }
+  header { padding:16px 20px; font-weight:700; font-size:18px; border-bottom:1px solid #262a33; }
+  main { max-width:1100px; margin:0 auto; padding:20px 16px; }
+  .card { background:var(--card); border-radius:12px; padding:20px; margin-bottom:16px; }
+  button, select, input { font:inherit; border-radius:8px; border:1px solid #2c313c; background:#222631; color:var(--txt); padding:10px 14px; }
+  button { cursor:pointer; background:var(--acc); border:none; font-weight:600; }
+  button.sec { background:#2a2f3a; }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  input { flex:1; min-width:200px; }
+  .mut { color:var(--mut); font-size:14px; }
+  #status { margin-top:10px; font-size:14px; }
+  .ok { color:var(--ok); } .err { color:var(--err); }
+  #stage { position:relative; background:#000; border-radius:12px; overflow:hidden; display:none; }
+  video { width:100%; max-height:80vh; display:block; background:#000; }
+  #stats { position:absolute; top:8px; left:8px; background:#000a; padding:4px 8px; border-radius:6px; font:12px monospace; }
+  #tools { position:absolute; top:8px; right:8px; display:flex; gap:6px; }
+  #tools button { padding:6px 10px; font-size:13px; background:#000a; }
+</style>
+</head>
+<body>
+<header>🖥️ Partage d'écran</header>
+<main>
+  <div class="card" id="home">
+    <h3 style="margin-top:0">Partager mon écran</h3>
+    <div class="row">
+      <select id="quality">
+        <option value="1080p60">1080p · 60 fps (recommandé)</option>
+        <option value="1080p30">1080p · 30 fps (texte net)</option>
+        <option value="1440p60">1440p · 60 fps</option>
+        <option value="4k30">4K · 30 fps</option>
+        <option value="720p30">720p · 30 fps (connexion lente)</option>
+      </select>
+      <button id="shareBtn">Partager mon écran</button>
+      <button id="stopBtn" class="sec" disabled>Arrêter</button>
+    </div>
+    <div id="linkBox" style="display:none;margin-top:14px">
+      <div class="mut">Envoie ce lien à l'autre personne :</div>
+      <div class="row" style="margin-top:6px">
+        <input id="link" readonly>
+        <button id="copyBtn" class="sec">Copier</button>
+      </div>
+      <div class="mut" id="viewers" style="margin-top:6px">0 spectateur</div>
+    </div>
+    <hr style="border-color:#262a33;margin:20px 0">
+    <h3>Regarder l'écran de quelqu'un</h3>
+    <div class="row">
+      <input id="code" placeholder="Colle le lien ou le code reçu">
+      <button id="joinBtn" class="sec">Rejoindre</button>
+    </div>
+    <div id="status" class="mut"></div>
+  </div>
+
+  <div id="stage">
+    <video id="video" autoplay playsinline muted></video>
+    <div id="stats"></div>
+    <div id="tools">
+      <button id="soundBtn">🔇 Son</button>
+      <button id="fsBtn">⛶ Plein écran</button>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const PRESETS = {
+  '1080p60': { w:1920, h:1080, fps:60, kbps:8000,  hint:'motion' },
+  '1080p30': { w:1920, h:1080, fps:30, kbps:6000,  hint:'detail' },
+  '1440p60': { w:2560, h:1440, fps:60, kbps:14000, hint:'motion' },
+  '4k30':    { w:3840, h:2160, fps:30, kbps:20000, hint:'detail' },
+  '720p30':  { w:1280, h:720,  fps:30, kbps:2500,  hint:'detail' },
+};
+let peer, stream, preset, calls = [], statsTimer;
+
+function status(msg, cls='mut') { $('status').className = cls; $('status').textContent = msg; }
+function newPeer() {
+  // Serveur de signalisation PeerJS public + STUN/TURN pour traverser les box/NAT
+  return new Peer({ config: { iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'turn:eu-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' },
+    { urls: 'turn:us-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' },
+  ]}});
+}
+
+// Pousse le débit et privilégie la résolution/fluidité selon le preset
+async function tuneSender(pc) {
+  for (const s of pc.getSenders()) {
+    if (!s.track || s.track.kind !== 'video') continue;
+    const p = s.getParameters();
+    if (!p.encodings || !p.encodings.length) p.encodings = [{}];
+    p.encodings[0].maxBitrate = preset.kbps * 1000;
+    p.encodings[0].maxFramerate = preset.fps;
+    p.degradationPreference = preset.hint === 'detail' ? 'maintain-resolution' : 'balanced';
+    try { await s.setParameters(p); } catch (e) { console.warn(e); }
+  }
+}
+
+// Préférence de codec : AV1 > VP9 > H264 > VP8
+function preferCodecs(pc) {
+  if (!RTCRtpSender.getCapabilities) return;
+  const caps = RTCRtpSender.getCapabilities('video').codecs;
+  const rank = c => ['video/AV1','video/VP9','video/H264','video/VP8'].indexOf(c.mimeType);
+  const sorted = [...caps].sort((a,b) => (rank(a)<0?99:rank(a)) - (rank(b)<0?99:rank(b)));
+  for (const t of pc.getTransceivers()) {
+    if (t.sender.track?.kind === 'video' && t.setCodecPreferences) {
+      try { t.setCodecPreferences(sorted); } catch (e) {}
+    }
+  }
+}
+
+$('shareBtn').onclick = async () => {
+  preset = PRESETS[$('quality').value];
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { width:{ideal:preset.w}, height:{ideal:preset.h}, frameRate:{ideal:preset.fps, max:preset.fps} },
+      audio: true,
+    });
+  } catch (e) { return status("Partage annulé.", 'err'); }
+  const vt = stream.getVideoTracks()[0];
+  vt.contentHint = preset.hint;
+  vt.onended = stop;
+  showVideo(stream, true);
+
+  peer = newPeer();
+  peer.on('open', id => {
+    const url = location.href.split('#')[0].split('?')[0] + '#' + id;
+    $('link').value = url; $('linkBox').style.display = 'block';
+    $('shareBtn').disabled = true; $('stopBtn').disabled = false;
+    status('En ligne — en attente de spectateur…', 'ok');
+  });
+  peer.on('connection', conn => conn.on('open', () => {
+    const call = peer.call(conn.peer, stream);
+    preferCodecs(call.peerConnection);
+    call.peerConnection.addEventListener('connectionstatechange', () => {
+      if (call.peerConnection.connectionState === 'connected') tuneSender(call.peerConnection);
+    });
+    calls.push(call); updateViewers();
+    const drop = () => { calls = calls.filter(c => c !== call); updateViewers(); };
+    call.on('close', drop); conn.on('close', () => { call.close(); drop(); });
+  }));
+  peer.on('error', e => status('Erreur : ' + e.type, 'err'));
+};
+
+function updateViewers() {
+  const n = calls.length;
+  $('viewers').textContent = n + (n > 1 ? ' spectateurs' : ' spectateur');
+  if (n) status('Quelqu\'un regarde ton écran 👀', 'ok');
+}
+
+function stop() {
+  stream?.getTracks().forEach(t => t.stop());
+  calls.forEach(c => c.close()); calls = [];
+  peer?.destroy(); peer = null;
+  $('shareBtn').disabled = false; $('stopBtn').disabled = true;
+  $('linkBox').style.display = 'none'; $('stage').style.display = 'none';
+  clearInterval(statsTimer); status('Partage arrêté.');
+}
+$('stopBtn').onclick = stop;
+$('copyBtn').onclick = () => { navigator.clipboard.writeText($('link').value); $('copyBtn').textContent = 'Copié ✓'; };
+
+function join(code) {
+  code = code.trim().split('#').pop();
+  if (!code) return;
+  status('Connexion…');
+  peer = newPeer();
+  peer.on('open', () => {
+    const conn = peer.connect(code, { reliable: true });
+    conn.on('close', () => status('L\'hôte a arrêté le partage.', 'err'));
+  });
+  peer.on('call', call => {
+    call.answer();
+    call.on('stream', s => { showVideo(s, false); status('Connecté ✓', 'ok'); });
+    call.on('close', () => { $('stage').style.display = 'none'; status('Partage terminé.'); });
+  });
+  peer.on('error', e => status(e.type === 'peer-unavailable' ? 'Code invalide ou partage terminé.' : 'Erreur : ' + e.type, 'err'));
+}
+$('joinBtn').onclick = () => join($('code').value);
+
+function showVideo(s, isHost) {
+  const v = $('video');
+  v.srcObject = s; v.muted = true;
+  $('stage').style.display = 'block';
+  $('soundBtn').style.display = (!isHost && s.getAudioTracks().length) ? '' : 'none';
+  clearInterval(statsTimer);
+  let last = null;
+  statsTimer = setInterval(async () => {
+    const pc = isHost ? calls[0]?.peerConnection : Object.values(peer?.connections || {}).flat().find(c => c.peerConnection?.getReceivers)?.peerConnection;
+    let txt = `${v.videoWidth}×${v.videoHeight}`;
+    if (pc) {
+      const r = await pc.getStats();
+      r.forEach(x => {
+        if (x.kind === 'video' && (x.type === (isHost ? 'outbound-rtp' : 'inbound-rtp'))) {
+          const bytes = isHost ? x.bytesSent : x.bytesReceived;
+          if (last) txt += ` · ${Math.round((bytes - last.b) * 8 / (x.timestamp - last.t))} kb/s`;
+          if (x.framesPerSecond) txt += ` · ${Math.round(x.framesPerSecond)} fps`;
+          last = { b: bytes, t: x.timestamp };
+        }
+      });
+    }
+    $('stats').textContent = (isHost ? 'Aperçu · ' : '') + txt;
+  }, 1000);
+}
+$('soundBtn').onclick = () => { const v = $('video'); v.muted = !v.muted; $('soundBtn').textContent = v.muted ? '🔇 Son' : '🔊 Son'; };
+$('fsBtn').onclick = () => $('stage').requestFullscreen?.();
+
+// Ouverture directe via un lien partagé (…#code)
+if (location.hash.length > 1) { $('code').value = location.hash.slice(1); join(location.hash.slice(1)); }
+</script>
+</body>
+</html>
