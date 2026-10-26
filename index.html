@@ -4,518 +4,211 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Partage d'écran</title>
+<link rel="stylesheet" href="style.css">
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-<style>
-  :root { --bg:#0f1115; --card:#181b22; --txt:#e8eaf0; --mut:#8b90a0; --acc:#4f8cff; --ok:#3ecf8e; --err:#ff5c5c; }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--txt); }
-  header { padding:16px 20px; font-weight:700; font-size:18px; border-bottom:1px solid #262a33; display:flex; justify-content:space-between; align-items:center; gap:10px; }
-  main { max-width:1100px; margin:0 auto; padding:20px 16px; }
-  .card { background:var(--card); border-radius:12px; padding:20px; margin-bottom:16px; }
-  button, select, input { font:inherit; border-radius:8px; border:1px solid #2c313c; background:#222631; color:var(--txt); padding:10px 14px; }
-  button { cursor:pointer; background:var(--acc); border:none; font-weight:600; }
-  button.sec { background:#2a2f3a; }
-  button.red { background:var(--err); }
-  button.on { background:var(--ok); color:#06210f; }
-  button:disabled { opacity:.5; cursor:default; }
-  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-  input { flex:1; min-width:180px; }
-  .mut { color:var(--mut); font-size:14px; }
-  #status { margin-top:10px; font-size:14px; }
-  .ok { color:var(--ok); } .err { color:var(--err); }
-  .hidden { display:none !important; }
-  #roomCode { user-select:all; }
-
-  /* Participants façon Discord */
-  #people { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
-  .person { display:flex; align-items:center; gap:8px; background:#222631; padding:6px 12px 6px 6px; border-radius:999px; font-size:14px; }
-  .avatar { width:32px; height:32px; border-radius:50%; background:#3a4152; display:flex; align-items:center; justify-content:center; font-weight:700; box-shadow:0 0 0 2px transparent; transition:box-shadow .1s; }
-  .person.speaking .avatar { box-shadow:0 0 0 3px var(--ok); }
-  .person .icons { color:var(--mut); }
-
-  #controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
-
-  #stage { position:relative; background:#000; border-radius:12px; overflow:hidden; min-height:200px; display:flex; align-items:center; justify-content:center; }
-  #stage .empty { color:var(--mut); padding:60px 20px; text-align:center; }
-  #remoteVideo { width:100%; max-height:75vh; display:block; background:#000; }
-  #localPreview { position:absolute; right:10px; bottom:10px; width:22%; min-width:120px; border-radius:8px; border:2px solid #fff3; background:#000; }
-  #stats { position:absolute; top:8px; left:8px; background:#000a; padding:4px 8px; border-radius:6px; font:12px monospace; }
-  #tools { position:absolute; top:8px; right:8px; display:flex; gap:6px; z-index:3; }
-  #tools button { padding:6px 10px; font-size:13px; background:#000a; }
-  #unmute { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:18px; padding:14px 22px; z-index:4; }
-  #audioWarn { margin-bottom:10px; font-size:14px; }
-
-  #stage:fullscreen, #stage:-webkit-full-screen, #stage.fake-fs {
-    position:fixed; inset:0; z-index:1000; border-radius:0; width:100vw; height:100vh; height:100dvh;
-  }
-  #stage:fullscreen #remoteVideo, #stage:-webkit-full-screen #remoteVideo, #stage.fake-fs #remoteVideo {
-    width:100%; height:100%; max-height:none; object-fit:contain;
-  }
-  #stage.fake-fs #tools { top:max(8px, env(safe-area-inset-top)); right:max(8px, env(safe-area-inset-right)); }
-  body.fs-lock { overflow:hidden; }
-</style>
 </head>
 <body>
 <header>
-  <span>🖥️ Partage d'écran</span>
-  <span id="roomInfo" class="mut hidden"></span>
+  <span class="logo">🖥️ Partage d'écran</span>
+  <button class="icon-btn" id="openSettingsTop" title="Paramètres">⚙️</button>
 </header>
-<main>
-  <!-- Accueil -->
-  <div class="card" id="home">
-    <div class="row" style="margin-bottom:16px">
-      <input id="name" placeholder="Ton pseudo" maxlength="20">
-    </div>
-    <h3 style="margin-top:0">Créer un channel</h3>
-    <button id="createBtn">➕ Créer un channel</button>
-    <hr style="border-color:#262a33;margin:20px 0">
+
+<!-- ===== Accueil ===== -->
+<main id="home">
+  <div class="card">
+    <label class="lbl" for="name">Pseudo</label>
+    <input id="name" placeholder="Ton pseudo" maxlength="20">
+
+    <h3>Créer un channel</h3>
+    <button id="createBtn" class="primary">➕ Créer un channel</button>
+
     <h3>Rejoindre un channel</h3>
     <div class="row">
-      <input id="code" placeholder="Code du channel (ex : K7P2QX)" autocapitalize="characters" autocomplete="off" style="text-transform:uppercase;letter-spacing:2px">
-      <button id="joinBtn" class="sec">Rejoindre</button>
+      <input id="code" class="code-input" placeholder="CODE (ex : K7P2QX)" autocapitalize="characters" autocomplete="off">
+      <button id="joinBtn">Rejoindre</button>
     </div>
     <div id="status" class="mut"></div>
   </div>
+</main>
 
-  <!-- Salon -->
-  <div id="room" class="hidden">
-    <div class="card" id="linkBox">
-      <div class="mut">Code du channel — donne-le à tes potes pour qu'ils rejoignent :</div>
-      <div class="row" style="margin-top:6px">
-        <span id="roomCode" style="font-size:32px;font-weight:800;letter-spacing:6px;font-family:monospace"></span>
-        <button id="copyCodeBtn" class="sec">Copier le code</button>
-        <button id="copyBtn" class="sec">Copier le lien</button>
+<!-- ===== Channel ===== -->
+<div id="room" class="hidden">
+  <aside id="sidebar">
+    <div class="chan-head">
+      <div class="chan-title">🔊 Channel <span id="roomCode" class="code"></span></div>
+      <div class="row tight">
+        <button id="copyCodeBtn" class="small">Copier le code</button>
+        <button id="copyBtn" class="small">Copier le lien</button>
       </div>
-      <input id="link" readonly class="hidden">
     </div>
-
     <div id="people"></div>
-
-    <div id="controls">
-      <button id="micBtn" class="sec">🎙️ Activer le micro</button>
-      <select id="quality">
-        <option value="1080p60">1080p · 60 fps</option>
-        <option value="1080p30">1080p · 30 fps (texte net)</option>
-        <option value="1440p60">1440p · 60 fps</option>
-        <option value="4k30">4K · 30 fps</option>
-        <option value="720p30">720p · 30 fps (connexion lente)</option>
-      </select>
-      <button id="shareBtn" class="sec">🖥️ Partager l'écran</button>
-      <button id="leaveBtn" class="red">📞 Quitter</button>
+    <div id="panel">
+      <div class="me">
+        <div class="avatar" id="meAvatar"></div>
+        <div class="me-txt"><div id="meName"></div><div class="mut tiny" id="meSub"></div></div>
+      </div>
+      <button class="icon-btn" id="micBtn" title="Micro (couper / réactiver)">🎙️</button>
+      <button class="icon-btn" id="deafBtn" title="Sourdine (ne plus rien entendre)">🎧</button>
+      <button class="icon-btn" id="openSettings" title="Paramètres">⚙️</button>
     </div>
-    <div id="audioWarn" class="err hidden">⚠️ Aucun son d'écran partagé. Pour l'avoir : partage un <b>onglet Chrome</b> en cochant « Partager l'audio de l'onglet » (ou l'<b>écran entier</b> sur Windows avec « Partager l'audio du système »).</div>
+  </aside>
 
+  <section id="mainArea">
+    <div id="audioWarn" class="warn hidden">⚠️ Aucun son d'écran partagé. Pour l'avoir : partage un <b>onglet Chrome</b> en cochant « Partager l'audio de l'onglet » (ou l'<b>écran entier</b> sur Windows avec « Partager l'audio du système »).</div>
     <div id="stage">
       <div class="empty" id="emptyMsg">Personne ne partage son écran pour l'instant.</div>
       <video id="remoteVideo" class="hidden" autoplay playsinline></video>
       <video id="localPreview" class="hidden" autoplay playsinline muted></video>
       <div id="stats" class="hidden"></div>
+      <div id="watching" class="hidden"></div>
       <div id="tools" class="hidden"><button id="fsBtn">⛶ Plein écran</button></div>
-      <button id="unmute" class="hidden">🔊 Toucher pour activer le son</button>
+      <button id="unmute" class="primary hidden">🔊 Toucher pour activer le son</button>
     </div>
-    <div id="audios" class="hidden"></div>
+    <div id="bar">
+      <button id="pttBtn" class="hidden">🎙️ Maintenir pour parler</button>
+      <select id="quality" title="Qualité du partage"></select>
+      <button id="shareBtn">🖥️ Partager l'écran</button>
+      <button id="leaveBtn" class="danger">📞 Quitter</button>
+    </div>
+  </section>
+  <div id="audios" class="hidden"></div>
+</div>
+
+<!-- ===== Menu d'un utilisateur ===== -->
+<div id="userMenu" class="popover hidden">
+  <div class="pop-title" id="umName"></div>
+  <button id="umWatch" class="primary small hidden">📺 Regarder son écran</button>
+  <label class="lbl">Volume de l'utilisateur <span id="umVolVal"></span></label>
+  <input type="range" id="umVol" min="0" max="100" step="1">
+  <div id="umStreamBox">
+    <label class="lbl">Volume du stream <span id="umStreamVal"></span></label>
+    <input type="range" id="umStream" min="0" max="100" step="1">
   </div>
-</main>
+  <label class="check"><input type="checkbox" id="umMute"> Rendre muet (pour moi)</label>
+  <div class="mut tiny hidden" id="umNoVol">Sur iPhone/iPad, règle le volume avec les boutons de l'appareil.</div>
+</div>
 
-<script>
-const $ = id => document.getElementById(id);
-const PRESETS = {
-  '1080p60': { w:1920, h:1080, fps:60, kbps:8000,  hint:'motion' },
-  '1080p30': { w:1920, h:1080, fps:30, kbps:6000,  hint:'detail' },
-  '1440p60': { w:2560, h:1440, fps:60, kbps:14000, hint:'motion' },
-  '4k30':    { w:3840, h:2160, fps:30, kbps:20000, hint:'detail' },
-  '720p30':  { w:1280, h:720,  fps:30, kbps:2500,  hint:'detail' },
-};
-const canShare = !!navigator.mediaDevices?.getDisplayMedia; // pas dispo sur iPad/iPhone
+<!-- ===== Paramètres ===== -->
+<div id="settings" class="modal hidden">
+  <div class="modal-box">
+    <nav class="tabs">
+      <div class="tabs-title">Paramètres</div>
+      <button data-tab="voice" class="tab active">🎙️ Voix et audio</button>
+      <button data-tab="screen" class="tab">🖥️ Partage d'écran</button>
+      <button data-tab="profile" class="tab">👤 Profil</button>
+      <button data-tab="notif" class="tab">🔔 Sons</button>
+    </nav>
+    <div class="tab-content">
+      <button class="icon-btn close" id="closeSettings" title="Fermer (Échap)">✕</button>
 
-let peer, myName = 'Moi', preset, roomCode = null, isHost = false;
-const PREFIX = 'partage-ecran-bommer5-'; // évite les collisions sur le serveur PeerJS public
-const ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sans 0/O ni 1/I
-const randomCode = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), b => ALPHA[b % ALPHA.length]).join('');
-const cleanCode = c => c.trim().split('#').pop().toUpperCase().replace(/[^A-Z0-9]/g, '');
-let micStream = null, screenStream = null;
-let audioCtx = null, statsTimer = null;
-// Un « ami » par connexion : { conn, name, voiceOut, screenOut, voiceIn, screenIn, audioEl, muted }
-const friends = new Map();
-// Crée l'entrée à la volée : un appel peut arriver avant que la connexion soit « open »
-function getFriend(id) {
-  if (!friends.has(id)) friends.set(id, { name: 'Ami' });
-  return friends.get(id);
-}
+      <!-- Voix -->
+      <section data-pane="voice">
+        <h2>Voix et audio</h2>
+        <div class="grid2">
+          <div>
+            <label class="lbl" for="inputSel">Périphérique d'entrée</label>
+            <select id="inputSel"></select>
+          </div>
+          <div id="outputBox">
+            <label class="lbl" for="outputSel">Périphérique de sortie</label>
+            <select id="outputSel"></select>
+          </div>
+        </div>
+        <div class="mut tiny hidden" id="noSink">Le choix de la sortie n'est pas possible dans ce navigateur (utilise Chrome ou Edge sur ordinateur).</div>
+        <button id="permBtn" class="small hidden">Autoriser le micro pour voir les périphériques</button>
 
-// ---------- Utilitaires ----------
-function status(msg, cls='mut') { $('status').className = cls; $('status').textContent = msg; }
-try { $('name').value = localStorage.getItem('pseudo') || ''; } catch (e) {}
+        <div class="grid2">
+          <div>
+            <label class="lbl">Volume d'entrée <span id="inVolVal"></span></label>
+            <input type="range" id="inVol" min="0" max="200" step="1">
+          </div>
+          <div id="outVolBox">
+            <label class="lbl">Volume de sortie <span id="outVolVal"></span></label>
+            <input type="range" id="outVol" min="0" max="100" step="1">
+          </div>
+        </div>
 
-function newPeer(id) {
-  // Serveur de signalisation PeerJS public + STUN/TURN pour traverser les box/NAT
-  const opts = { config: { iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'turn:eu-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' },
-    { urls: 'turn:us-0.turn.peerjs.com:3478', username: 'peerjs', credential: 'peerjsp' },
-  ]}};
-  return id ? new Peer(id, opts) : new Peer(opts);
-}
+        <div class="test">
+          <button id="testBtn">🎧 Tester mon micro</button>
+          <span class="mut tiny">Tu t'entends comme les autres t'entendent.</span>
+        </div>
 
-function initAudio() {
-  // À appeler pendant un clic : iPad exige un geste pour lancer le son
-  if (!audioCtx) try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
-  audioCtx?.resume?.();
-}
+        <h3>Mode d'entrée</h3>
+        <label class="radio"><input type="radio" name="mode" value="vad"> Détection de la voix</label>
+        <label class="radio"><input type="radio" name="mode" value="ptt"> Appuyer pour parler</label>
 
-// Détection « en train de parler » (cercle vert autour de l'avatar)
-const meters = new Map();
-function watchLevel(key, stream) {
-  if (!audioCtx || !stream.getAudioTracks().length) return;
-  const src = audioCtx.createMediaStreamSource(stream);
-  const an = audioCtx.createAnalyser(); an.fftSize = 512;
-  src.connect(an);
-  meters.set(key, { an, buf: new Uint8Array(an.fftSize) });
-}
-setInterval(() => {
-  for (const [key, m] of meters) {
-    m.an.getByteTimeDomainData(m.buf);
-    let sum = 0; for (const v of m.buf) sum += (v - 128) ** 2;
-    const speaking = Math.sqrt(sum / m.buf.length) > 6;
-    document.querySelector(`.person[data-id="${CSS.escape(key)}"]`)?.classList.toggle('speaking', speaking);
-  }
-}, 120);
+        <div id="vadBox">
+          <label class="check"><input type="checkbox" id="vadAuto"> Régler automatiquement la sensibilité</label>
+          <label class="lbl">Sensibilité d'entrée <span id="vadVal" class="mut"></span></label>
+          <div class="meter">
+            <div class="meter-fill" id="meterFill"></div>
+            <div class="meter-mark" id="meterMark"></div>
+            <input type="range" id="vadSlider" min="-100" max="0" step="1">
+          </div>
+          <div class="mut tiny">La barre devient verte quand ta voix passe. En dessous du repère, rien n'est envoyé.</div>
+        </div>
 
-// ---------- Qualité vidéo ----------
-async function tuneSender(pc) {
-  for (const s of pc.getSenders()) {
-    if (!s.track || s.track.kind !== 'video') continue;
-    const p = s.getParameters();
-    if (!p.encodings || !p.encodings.length) p.encodings = [{}];
-    p.encodings[0].maxBitrate = preset.kbps * 1000;
-    p.encodings[0].maxFramerate = preset.fps;
-    p.degradationPreference = preset.hint === 'detail' ? 'maintain-resolution' : 'balanced';
-    try { await s.setParameters(p); } catch (e) { console.warn(e); }
-  }
-}
-function preferCodecs(pc) {
-  if (!RTCRtpSender.getCapabilities) return;
-  const caps = RTCRtpSender.getCapabilities('video').codecs;
-  const rank = c => ['video/AV1','video/VP9','video/H264','video/VP8'].indexOf(c.mimeType);
-  const sorted = [...caps].sort((a,b) => (rank(a)<0?99:rank(a)) - (rank(b)<0?99:rank(b)));
-  for (const t of pc.getTransceivers()) {
-    if (t.sender.track?.kind === 'video' && t.setCodecPreferences) {
-      try { t.setCodecPreferences(sorted); } catch (e) {}
-    }
-  }
-}
+        <div id="pttBox" class="hidden">
+          <div class="grid2">
+            <div>
+              <label class="lbl">Raccourci</label>
+              <button id="pttKeyBtn"></button>
+            </div>
+            <div>
+              <label class="lbl">Délai de relâchement <span id="pttDelayVal"></span></label>
+              <input type="range" id="pttDelay" min="0" max="1000" step="20">
+            </div>
+          </div>
+          <div class="mut tiny">Le raccourci marche quand la page est au premier plan. Sur téléphone/tablette, utilise le bouton « Maintenir pour parler ».</div>
+        </div>
 
-// ---------- Salon ----------
-function startPeer(id) {
-  myName = $('name').value.trim() || 'Moi';
-  try { localStorage.setItem('pseudo', myName); } catch (e) {}
-  initAudio();
-  peer = newPeer(id);
-  peer.on('connection', setupConn);
-  peer.on('call', onIncomingCall);
-  peer.on('disconnected', () => { if (peer && !peer.destroyed) peer.reconnect(); });
-  return peer;
-}
+        <h3>Traitement de la voix</h3>
+        <label class="check"><input type="checkbox" id="noise"> Suppression du bruit</label>
+        <label class="check"><input type="checkbox" id="echo"> Annulation de l'écho</label>
+        <label class="check"><input type="checkbox" id="agc"> Contrôle automatique du gain</label>
 
-function showCode() {
-  $('roomCode').textContent = roomCode;
-  $('link').value = location.href.split('#')[0].split('?')[0] + '#' + roomCode;
-}
-function createChannel() {
-  status('Création du channel…');
-  roomCode = randomCode(); isHost = true;
-  startPeer(PREFIX + roomCode).on('open', () => { showCode(); enterRoom(); });
-  peer.on('error', e => {
-    if (e.type === 'unavailable-id') { peer.destroy(); return createChannel(); } // code déjà pris : on en tire un autre
-    status('Erreur : ' + e.type, 'err');
-  });
-}
-$('createBtn').onclick = createChannel;
+        <h3>Qualité de la voix</h3>
+        <select id="voiceBitrate">
+          <option value="32">Standard (32 kb/s)</option>
+          <option value="64">Haute (64 kb/s)</option>
+          <option value="128">Très haute (128 kb/s)</option>
+        </select>
+      </section>
 
-function join(code) {
-  code = cleanCode(code);
-  if (code.length < 4) return status('Entre le code du channel.', 'err');
-  status('Connexion…');
-  roomCode = code; isHost = false;
-  startPeer().on('open', () => {
-    setupConn(peer.connect(PREFIX + code, { reliable: true }));
-    // Sans réponse au bout de 8 s, le channel n'existe pas
-    const me = peer;
-    setTimeout(() => {
-      if (peer === me && $('room').classList.contains('hidden')) {
-        leave(true); status('Ce channel n\'existe pas (ou son créateur l\'a fermé).', 'err');
-      }
-    }, 8000);
-  });
-  peer.on('error', e => {
-    const inRoom = !$('room').classList.contains('hidden');
-    if (e.type === 'peer-unavailable') {
-      if (inRoom) return; // un membre du channel est parti entre-temps, pas grave
-      status('Ce channel n\'existe pas (ou son créateur l\'a fermé).', 'err');
-      return leave(true);
-    }
-    status('Erreur : ' + e.type, 'err');
-  });
-}
-$('code').addEventListener('keydown', e => { if (e.key === 'Enter') join($('code').value); });
-$('joinBtn').onclick = () => join($('code').value);
+      <!-- Écran -->
+      <section data-pane="screen" class="hidden">
+        <h2>Partage d'écran</h2>
+        <label class="lbl" for="qualitySel">Qualité</label>
+        <select id="qualitySel"></select>
+        <label class="lbl" for="hintSel">Optimiser pour</label>
+        <select id="hintSel">
+          <option value="auto">Automatique</option>
+          <option value="motion">Fluidité (jeux, vidéos)</option>
+          <option value="detail">Netteté (texte, code)</option>
+        </select>
+        <label class="check"><input type="checkbox" id="screenAudio"> Partager aussi le son (si possible)</label>
+        <label class="check"><input type="checkbox" id="showStats"> Afficher les infos (résolution, fps, débit)</label>
+      </section>
 
-function setupConn(conn) {
-  conn.on('open', () => {
-    getFriend(conn.peer).conn = conn;
-    conn.send({ type: 'hello', name: myName });
-    // Le créateur envoie la liste des membres au nouveau venu, qui se connecte à chacun
-    if (isHost) conn.send({ type: 'peers', list: [...friends.keys()].filter(id => id !== conn.peer && friends.get(id).conn) });
-    if ($('room').classList.contains('hidden')) { showCode(); enterRoom(); }
-    if (micStream) sendVoice(conn.peer);
-    if (screenStream) sendScreen(conn.peer);
-    renderPeople();
-  });
-  conn.on('data', d => {
-    const f = friends.get(conn.peer); if (!f) return;
-    if (d.type === 'hello') f.name = String(d.name || 'Ami').slice(0, 20);
-    if (d.type === 'mute') f.muted = !!d.muted;
-    if (d.type === 'screen-off') hideRemoteScreen(conn.peer);
-    if (d.type === 'peers') for (const id of d.list || []) {
-      if (id !== peer.id && !friends.get(id)?.conn) setupConn(peer.connect(id, { reliable: true }));
-    }
-    renderPeople();
-  });
-  conn.on('close', () => dropFriend(conn.peer));
-}
+      <!-- Profil -->
+      <section data-pane="profile" class="hidden">
+        <h2>Profil</h2>
+        <label class="lbl" for="nameSet">Pseudo</label>
+        <input id="nameSet" maxlength="20">
+        <label class="lbl">Couleur</label>
+        <div id="colors" class="colors"></div>
+      </section>
 
-function dropFriend(id) {
-  const f = friends.get(id); if (!f) return;
-  [f.voiceOut, f.screenOut, f.voiceIn, f.screenIn].forEach(c => c?.close());
-  f.audioEl?.remove();
-  meters.delete(id);
-  hideRemoteScreen(id);
-  friends.delete(id);
-  renderPeople();
-}
+      <!-- Sons -->
+      <section data-pane="notif" class="hidden">
+        <h2>Sons</h2>
+        <label class="check"><input type="checkbox" id="sounds"> Sons quand quelqu'un arrive, part, coupe son micro…</label>
+      </section>
+    </div>
+  </div>
+</div>
 
-function enterRoom() {
-  $('home').classList.add('hidden');
-  $('room').classList.remove('hidden');
-  $('roomInfo').classList.remove('hidden');
-  if (!canShare) { $('shareBtn').classList.add('hidden'); $('quality').classList.add('hidden'); }
-  renderPeople();
-}
-
-function renderPeople() {
-  const me = `<div class="person" data-id="me"><div class="avatar">${esc(myName[0]).toUpperCase()}</div>${esc(myName)} (toi)
-    <span class="icons">${!micStream ? '🔇' : micStream.getAudioTracks()[0].enabled ? '🎙️' : '🔇'}${screenStream ? ' 🖥️' : ''}</span></div>`;
-  const others = [...friends].map(([id, f]) => `<div class="person" data-id="${esc(id)}"><div class="avatar">${esc(f.name[0]).toUpperCase()}</div>${esc(f.name)}
-    <span class="icons">${!f.voiceIn || f.muted ? '🔇' : '🎙️'}${f.screenIn ? ' 🖥️' : ''}</span></div>`).join('');
-  $('people').innerHTML = me + others;
-  document.querySelectorAll('.person[data-id]').forEach(el => {
-    const g = friends.get(el.dataset.id);
-    if (g?.screenStreamIn) { el.style.cursor = 'pointer'; el.title = 'Voir son écran'; el.onclick = () => showRemoteScreen(el.dataset.id, g.screenStreamIn); }
-  });
-  const n = friends.size + 1;
-  $('roomInfo').textContent = `#${roomCode} · ${n} connecté${n > 1 ? 's' : ''}`;
-}
-const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-
-// ---------- Vocal ----------
-$('micBtn').onclick = async () => {
-  initAudio();
-  if (!micStream) {
-    try {
-      micStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-      });
-    } catch (e) { return alert("Impossible d'accéder au micro : autorise-le dans le navigateur."); }
-    watchLevel('me', micStream);
-    for (const id of friends.keys()) sendVoice(id);
-  } else {
-    const t = micStream.getAudioTracks()[0];
-    t.enabled = !t.enabled;
-  }
-  const on = micStream.getAudioTracks()[0].enabled;
-  $('micBtn').textContent = on ? '🎙️ Micro activé' : '🔇 Micro coupé';
-  $('micBtn').className = on ? 'on' : 'red';
-  for (const f of friends.values()) f.conn?.send({ type: 'mute', muted: !on });
-  renderPeople();
-};
-
-function sendVoice(id) {
-  const f = friends.get(id); if (!f) return;
-  f.voiceOut = peer.call(id, micStream, { metadata: { kind: 'voice' } });
-}
-
-function onIncomingCall(call) {
-  call.answer(); // on reçoit seulement ; chacun envoie ses propres flux
-  const kind = call.metadata?.kind;
-  const f = getFriend(call.peer);
-  f[kind === 'voice' ? 'voiceIn' : 'screenIn'] = call;
-  let done = false;
-  call.on('stream', s => {
-    if (done) return; // l'événement peut arriver une fois par piste
-    if (kind === 'voice') {
-      if (!s.getAudioTracks().length) return;
-      done = true; playVoice(call.peer, s);
-    } else { done = true; f.screenStreamIn = s; showRemoteScreen(call.peer, s); }
-    renderPeople();
-  });
-  call.on('close', () => { if (kind !== 'voice') hideRemoteScreen(call.peer); });
-}
-
-function playVoice(id, s) {
-  const f = friends.get(id); if (!f) return;
-  f.audioEl?.remove();
-  const a = document.createElement('audio');
-  a.autoplay = true; a.playsInline = true; a.srcObject = s;
-  $('audios').appendChild(a);
-  f.audioEl = a;
-  a.play().catch(() => $('unmute').classList.remove('hidden'));
-  watchLevel(id, s);
-}
-
-// ---------- Écran ----------
-$('shareBtn').onclick = async () => {
-  if (screenStream) return stopScreen();
-  preset = PRESETS[$('quality').value];
-  try {
-    screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { width:{ideal:preset.w}, height:{ideal:preset.h}, frameRate:{ideal:preset.fps, max:preset.fps} },
-      audio: true,
-    });
-  } catch (e) { screenStream = null; return; }
-  const vt = screenStream.getVideoTracks()[0];
-  vt.contentHint = preset.hint;
-  vt.onended = stopScreen;
-  $('audioWarn').classList.toggle('hidden', screenStream.getAudioTracks().length > 0);
-  $('localPreview').srcObject = screenStream;
-  $('localPreview').classList.remove('hidden');
-  $('emptyMsg').classList.add('hidden');
-  $('shareBtn').textContent = '⏹️ Arrêter le partage'; $('shareBtn').className = 'on';
-  $('quality').disabled = true;
-  for (const id of friends.keys()) sendScreen(id);
-  renderPeople();
-};
-
-function sendScreen(id) {
-  const f = friends.get(id); if (!f) return;
-  const call = peer.call(id, screenStream, { metadata: { kind: 'screen' } });
-  preferCodecs(call.peerConnection);
-  call.peerConnection.addEventListener('connectionstatechange', () => {
-    if (call.peerConnection.connectionState === 'connected') tuneSender(call.peerConnection);
-  });
-  f.screenOut = call;
-}
-
-function stopScreen() {
-  if (!screenStream) return;
-  screenStream.getTracks().forEach(t => t.stop());
-  screenStream = null;
-  for (const f of friends.values()) { f.conn?.send({ type: 'screen-off' }); f.screenOut?.close(); f.screenOut = null; }
-  $('localPreview').srcObject = null; $('localPreview').classList.add('hidden');
-  $('audioWarn').classList.add('hidden');
-  $('shareBtn').textContent = '🖥️ Partager l\'écran'; $('shareBtn').className = 'sec';
-  $('quality').disabled = false;
-  if ($('remoteVideo').classList.contains('hidden')) $('emptyMsg').classList.remove('hidden');
-  renderPeople();
-}
-
-let screenOwner = null;
-function showRemoteScreen(id, s) {
-  const v = $('remoteVideo');
-  screenOwner = id;
-  v.srcObject = s;
-  v.classList.remove('hidden'); $('emptyMsg').classList.add('hidden');
-  $('tools').classList.remove('hidden'); $('stats').classList.remove('hidden');
-  v.muted = false;
-  v.play().catch(() => { v.muted = true; v.play().catch(() => {}); $('unmute').classList.remove('hidden'); });
-  startStats(id);
-}
-function hideRemoteScreen(id) {
-  const f = friends.get(id); if (f) { f.screenIn = null; f.screenStreamIn = null; }
-  if (screenOwner !== id) return renderPeople();
-  const next = [...friends].find(([, g]) => g.screenStreamIn);
-  if (next) return showRemoteScreen(next[0], next[1].screenStreamIn);
-  screenOwner = null;
-  const v = $('remoteVideo');
-  v.srcObject = null; v.classList.add('hidden');
-  $('tools').classList.add('hidden'); $('stats').classList.add('hidden');
-  if (!screenStream) $('emptyMsg').classList.remove('hidden');
-  clearInterval(statsTimer); setFake(false);
-  renderPeople();
-}
-
-function startStats(id) {
-  clearInterval(statsTimer);
-  let last = null;
-  statsTimer = setInterval(async () => {
-    const v = $('remoteVideo'), pc = friends.get(id)?.screenIn?.peerConnection;
-    let txt = `${v.videoWidth}×${v.videoHeight}`;
-    if (pc) (await pc.getStats()).forEach(x => {
-      if (x.type === 'inbound-rtp' && x.kind === 'video') {
-        if (last) txt += ` · ${Math.round((x.bytesReceived - last.b) * 8 / (x.timestamp - last.t))} kb/s`;
-        if (x.framesPerSecond) txt += ` · ${Math.round(x.framesPerSecond)} fps`;
-        last = { b: x.bytesReceived, t: x.timestamp };
-      }
-    });
-    $('stats').textContent = txt;
-  }, 1000);
-}
-
-// Bouton de secours quand le navigateur bloque le son (iPad notamment)
-$('unmute').onclick = () => {
-  initAudio();
-  const v = $('remoteVideo'); v.muted = false; v.play().catch(() => {});
-  document.querySelectorAll('#audios audio').forEach(a => a.play().catch(() => {}));
-  $('unmute').classList.add('hidden');
-};
-
-// ---------- Quitter ----------
-function leave(silent) {
-  stopScreen();
-  micStream?.getTracks().forEach(t => t.stop()); micStream = null;
-  for (const id of [...friends.keys()]) dropFriend(id);
-  meters.clear();
-  peer?.destroy(); peer = null;
-  $('micBtn').textContent = '🎙️ Activer le micro'; $('micBtn').className = 'sec';
-  $('room').classList.add('hidden'); $('home').classList.remove('hidden');
-  $('roomInfo').classList.add('hidden');
-  $('copyBtn').textContent = 'Copier le lien'; $('copyCodeBtn').textContent = 'Copier le code';
-  roomCode = null; isHost = false;
-  $('unmute').classList.add('hidden');
-  history.replaceState(null, '', location.pathname);
-  if (!silent) status('Tu as quitté le channel.');
-}
-$('leaveBtn').onclick = () => leave();
-$('copyBtn').onclick = () => { navigator.clipboard.writeText($('link').value); $('copyBtn').textContent = 'Lien copié ✓'; };
-$('copyCodeBtn').onclick = () => { navigator.clipboard.writeText(roomCode); $('copyCodeBtn').textContent = 'Code copié ✓'; };
-
-// ---------- Plein écran (iPad / iPhone / ordinateur) ----------
-const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement;
-function setFake(on) {
-  $('stage').classList.toggle('fake-fs', on);
-  document.body.classList.toggle('fs-lock', on);
-  $('fsBtn').textContent = on ? '✕ Quitter' : '⛶ Plein écran';
-}
-$('fsBtn').onclick = async () => {
-  const st = $('stage'), v = $('remoteVideo');
-  if (st.classList.contains('fake-fs')) return setFake(false);
-  if (fsElement()) return (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-  try {
-    if (st.requestFullscreen) return await st.requestFullscreen();
-    if (st.webkitRequestFullscreen) return st.webkitRequestFullscreen(); // iPad Safari
-  } catch (e) {}
-  if (v.webkitEnterFullscreen) { try { return v.webkitEnterFullscreen(); } catch (e) {} } // iPhone
-  setFake(true); // secours : plein écran dans la page
-};
-const onFsChange = () => $('fsBtn').textContent = fsElement() ? '✕ Quitter' : '⛶ Plein écran';
-document.addEventListener('fullscreenchange', onFsChange);
-document.addEventListener('webkitfullscreenchange', onFsChange);
-document.addEventListener('keydown', e => { if (e.key === 'Escape') setFake(false); });
-
-// Lien partagé (…#code) : on pré-remplit, il reste à cliquer « Rejoindre » (geste requis pour le son sur iPad)
-if (location.hash.length > 1) {
-  $('code').value = cleanCode(location.hash);
-  status('Choisis un pseudo puis clique sur « Rejoindre ».', 'ok');
-}
-</script>
+<div id="toast" class="hidden"></div>
+<script src="app.js"></script>
 </body>
 </html>
