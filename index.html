@@ -24,6 +24,7 @@
   #status { margin-top:10px; font-size:14px; }
   .ok { color:var(--ok); } .err { color:var(--err); }
   .hidden { display:none !important; }
+  #roomCode { user-select:all; }
 
   /* Participants façon Discord */
   #people { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
@@ -65,12 +66,12 @@
     <div class="row" style="margin-bottom:16px">
       <input id="name" placeholder="Ton pseudo" maxlength="20">
     </div>
-    <h3 style="margin-top:0">Créer un salon</h3>
-    <button id="createBtn">Créer un salon</button>
+    <h3 style="margin-top:0">Créer un channel</h3>
+    <button id="createBtn">➕ Créer un channel</button>
     <hr style="border-color:#262a33;margin:20px 0">
-    <h3>Rejoindre un salon</h3>
+    <h3>Rejoindre un channel</h3>
     <div class="row">
-      <input id="code" placeholder="Colle le lien ou le code reçu">
+      <input id="code" placeholder="Code du channel (ex : K7P2QX)" autocapitalize="characters" autocomplete="off" style="text-transform:uppercase;letter-spacing:2px">
       <button id="joinBtn" class="sec">Rejoindre</button>
     </div>
     <div id="status" class="mut"></div>
@@ -79,11 +80,13 @@
   <!-- Salon -->
   <div id="room" class="hidden">
     <div class="card" id="linkBox">
-      <div class="mut">Envoie ce lien à l'autre personne :</div>
+      <div class="mut">Code du channel — donne-le à tes potes pour qu'ils rejoignent :</div>
       <div class="row" style="margin-top:6px">
-        <input id="link" readonly>
-        <button id="copyBtn" class="sec">Copier</button>
+        <span id="roomCode" style="font-size:32px;font-weight:800;letter-spacing:6px;font-family:monospace"></span>
+        <button id="copyCodeBtn" class="sec">Copier le code</button>
+        <button id="copyBtn" class="sec">Copier le lien</button>
       </div>
+      <input id="link" readonly class="hidden">
     </div>
 
     <div id="people"></div>
@@ -125,7 +128,11 @@ const PRESETS = {
 };
 const canShare = !!navigator.mediaDevices?.getDisplayMedia; // pas dispo sur iPad/iPhone
 
-let peer, myName = 'Moi', preset;
+let peer, myName = 'Moi', preset, roomCode = null, isHost = false;
+const PREFIX = 'partage-ecran-bommer5-'; // évite les collisions sur le serveur PeerJS public
+const ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sans 0/O ni 1/I
+const randomCode = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), b => ALPHA[b % ALPHA.length]).join('');
+const cleanCode = c => c.trim().split('#').pop().toUpperCase().replace(/[^A-Z0-9]/g, '');
 let micStream = null, screenStream = null;
 let audioCtx = null, statsTimer = null;
 // Un « ami » par connexion : { conn, name, voiceOut, screenOut, voiceIn, screenIn, audioEl, muted }
@@ -210,32 +217,56 @@ function startPeer(id) {
   return peer;
 }
 
-$('createBtn').onclick = () => {
-  status('Création du salon…');
-  startPeer().on('open', id => {
-    $('link').value = location.href.split('#')[0].split('?')[0] + '#' + id;
-    enterRoom();
-  });
-  peer.on('error', e => status('Erreur : ' + e.type, 'err'));
-};
-
-function join(code) {
-  code = code.trim().split('#').pop();
-  if (!code) return;
-  status('Connexion…');
-  startPeer().on('open', () => setupConn(peer.connect(code, { reliable: true })));
+function showCode() {
+  $('roomCode').textContent = roomCode;
+  $('link').value = location.href.split('#')[0].split('?')[0] + '#' + roomCode;
+}
+function createChannel() {
+  status('Création du channel…');
+  roomCode = randomCode(); isHost = true;
+  startPeer(PREFIX + roomCode).on('open', () => { showCode(); enterRoom(); });
   peer.on('error', e => {
-    status(e.type === 'peer-unavailable' ? 'Code invalide ou salon fermé.' : 'Erreur : ' + e.type, 'err');
-    if (e.type === 'peer-unavailable') leave(true);
+    if (e.type === 'unavailable-id') { peer.destroy(); return createChannel(); } // code déjà pris : on en tire un autre
+    status('Erreur : ' + e.type, 'err');
   });
 }
+$('createBtn').onclick = createChannel;
+
+function join(code) {
+  code = cleanCode(code);
+  if (code.length < 4) return status('Entre le code du channel.', 'err');
+  status('Connexion…');
+  roomCode = code; isHost = false;
+  startPeer().on('open', () => {
+    setupConn(peer.connect(PREFIX + code, { reliable: true }));
+    // Sans réponse au bout de 8 s, le channel n'existe pas
+    const me = peer;
+    setTimeout(() => {
+      if (peer === me && $('room').classList.contains('hidden')) {
+        leave(true); status('Ce channel n\'existe pas (ou son créateur l\'a fermé).', 'err');
+      }
+    }, 8000);
+  });
+  peer.on('error', e => {
+    const inRoom = !$('room').classList.contains('hidden');
+    if (e.type === 'peer-unavailable') {
+      if (inRoom) return; // un membre du channel est parti entre-temps, pas grave
+      status('Ce channel n\'existe pas (ou son créateur l\'a fermé).', 'err');
+      return leave(true);
+    }
+    status('Erreur : ' + e.type, 'err');
+  });
+}
+$('code').addEventListener('keydown', e => { if (e.key === 'Enter') join($('code').value); });
 $('joinBtn').onclick = () => join($('code').value);
 
 function setupConn(conn) {
   conn.on('open', () => {
     getFriend(conn.peer).conn = conn;
     conn.send({ type: 'hello', name: myName });
-    if ($('room').classList.contains('hidden')) { $('linkBox').classList.add('hidden'); enterRoom(); }
+    // Le créateur envoie la liste des membres au nouveau venu, qui se connecte à chacun
+    if (isHost) conn.send({ type: 'peers', list: [...friends.keys()].filter(id => id !== conn.peer && friends.get(id).conn) });
+    if ($('room').classList.contains('hidden')) { showCode(); enterRoom(); }
     if (micStream) sendVoice(conn.peer);
     if (screenStream) sendScreen(conn.peer);
     renderPeople();
@@ -245,6 +276,9 @@ function setupConn(conn) {
     if (d.type === 'hello') f.name = String(d.name || 'Ami').slice(0, 20);
     if (d.type === 'mute') f.muted = !!d.muted;
     if (d.type === 'screen-off') hideRemoteScreen(conn.peer);
+    if (d.type === 'peers') for (const id of d.list || []) {
+      if (id !== peer.id && !friends.get(id)?.conn) setupConn(peer.connect(id, { reliable: true }));
+    }
     renderPeople();
   });
   conn.on('close', () => dropFriend(conn.peer));
@@ -274,8 +308,12 @@ function renderPeople() {
   const others = [...friends].map(([id, f]) => `<div class="person" data-id="${esc(id)}"><div class="avatar">${esc(f.name[0]).toUpperCase()}</div>${esc(f.name)}
     <span class="icons">${!f.voiceIn || f.muted ? '🔇' : '🎙️'}${f.screenIn ? ' 🖥️' : ''}</span></div>`).join('');
   $('people').innerHTML = me + others;
+  document.querySelectorAll('.person[data-id]').forEach(el => {
+    const g = friends.get(el.dataset.id);
+    if (g?.screenStreamIn) { el.style.cursor = 'pointer'; el.title = 'Voir son écran'; el.onclick = () => showRemoteScreen(el.dataset.id, g.screenStreamIn); }
+  });
   const n = friends.size + 1;
-  $('roomInfo').textContent = `${n} dans le salon`;
+  $('roomInfo').textContent = `#${roomCode} · ${n} connecté${n > 1 ? 's' : ''}`;
 }
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -317,7 +355,7 @@ function onIncomingCall(call) {
     if (kind === 'voice') {
       if (!s.getAudioTracks().length) return;
       done = true; playVoice(call.peer, s);
-    } else { done = true; showRemoteScreen(call.peer, s); }
+    } else { done = true; f.screenStreamIn = s; showRemoteScreen(call.peer, s); }
     renderPeople();
   });
   call.on('close', () => { if (kind !== 'voice') hideRemoteScreen(call.peer); });
@@ -392,8 +430,10 @@ function showRemoteScreen(id, s) {
   startStats(id);
 }
 function hideRemoteScreen(id) {
-  const f = friends.get(id); if (f) f.screenIn = null;
-  if (screenOwner !== id) return;
+  const f = friends.get(id); if (f) { f.screenIn = null; f.screenStreamIn = null; }
+  if (screenOwner !== id) return renderPeople();
+  const next = [...friends].find(([, g]) => g.screenStreamIn);
+  if (next) return showRemoteScreen(next[0], next[1].screenStreamIn);
   screenOwner = null;
   const v = $('remoteVideo');
   v.srcObject = null; v.classList.add('hidden');
@@ -437,13 +477,16 @@ function leave(silent) {
   peer?.destroy(); peer = null;
   $('micBtn').textContent = '🎙️ Activer le micro'; $('micBtn').className = 'sec';
   $('room').classList.add('hidden'); $('home').classList.remove('hidden');
-  $('linkBox').classList.remove('hidden'); $('roomInfo').classList.add('hidden');
+  $('roomInfo').classList.add('hidden');
+  $('copyBtn').textContent = 'Copier le lien'; $('copyCodeBtn').textContent = 'Copier le code';
+  roomCode = null; isHost = false;
   $('unmute').classList.add('hidden');
   history.replaceState(null, '', location.pathname);
-  if (!silent) status('Tu as quitté le salon.');
+  if (!silent) status('Tu as quitté le channel.');
 }
 $('leaveBtn').onclick = () => leave();
-$('copyBtn').onclick = () => { navigator.clipboard.writeText($('link').value); $('copyBtn').textContent = 'Copié ✓'; };
+$('copyBtn').onclick = () => { navigator.clipboard.writeText($('link').value); $('copyBtn').textContent = 'Lien copié ✓'; };
+$('copyCodeBtn').onclick = () => { navigator.clipboard.writeText(roomCode); $('copyCodeBtn').textContent = 'Code copié ✓'; };
 
 // ---------- Plein écran (iPad / iPhone / ordinateur) ----------
 const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement;
@@ -470,7 +513,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') setFake(fals
 
 // Lien partagé (…#code) : on pré-remplit, il reste à cliquer « Rejoindre » (geste requis pour le son sur iPad)
 if (location.hash.length > 1) {
-  $('code').value = location.href;
+  $('code').value = cleanCode(location.hash);
   status('Choisis un pseudo puis clique sur « Rejoindre ».', 'ok');
 }
 </script>
